@@ -79,7 +79,7 @@ I0_vec[3:end] .= 2*0.001/(Nc-1)
 final_sizes =zeros(H_res,Nc)
 
 
-β = 2*1.6
+β = 1.6
 ν = 0.8
 @showprogress for i in 1:H_res
     for j in Ncs_range
@@ -115,11 +115,17 @@ function h_parm(H,sc)
     return (H+sc-1)/(2*sc-1)
 end
 
-heatmap(range(0,1,length = 50),range(0,1,length = 50),final_sizes, title = "β/ν = $(β/ν)",xlabel=L"s", ylabel=L"H")
-contour!(range(0,1,length = 50),range(0,1,length = 50),r0_calc/1000, levels = 1/1000:1/1000, label = "R0(s,H)",c =:red)
-vline!([ν/β], color=:blue, linewidth=2,label=L"ν/β")
 
-heatmap(r0_calc./10 .>1/10, title = "R0 = $(β/ν)")
+s = range(0,1,length = 50)
+H = range(0,1,length = 50)
 
-plot(analytic_R0.((0:1/10:1),50,100,β,ν))
+heatmap(s,H,final_sizes, title = "β/ν = $(β/ν)",xlabel=L"s", ylabel=L"H", colorbar_title = L"Final\,\,\,Size")
+contour!(s,H,r0_calc/1000, levels = 1/1000:1/1000,c =:red)
+annotate!(0.1, 0.9, text(L"R_0(s,H) = 1", :red, 8))
+
+vline!([ν/β], color=:blue, linewidth=2,label=L"ν/β",legend = :bottomright)
+
+savefig("Outbreaksizes_R0_2.pdf")
+
+
 
