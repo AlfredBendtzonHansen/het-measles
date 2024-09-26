@@ -3,6 +3,8 @@ import random
 import matplotlib.pyplot as plt
 import networkx as nx
 from scipy.interpolate import interp1d
+from tqdm import tqdm
+
 
 def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=42):
     """
@@ -87,9 +89,9 @@ def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=
             adjacency[n1].update(others)
 
     # Remove isolated nodes (nodes with no neighbors)
-    isolated_nodes = [node for node, neighbors in adjacency.items() if not neighbors]
-    for node in isolated_nodes:
-        del adjacency[node]
+    #isolated_nodes = [node for node, neighbors in adjacency.items() if not neighbors]
+    #for node in isolated_nodes:
+    #    del adjacency[node]
 
     # Reindex nodes to have consecutive indices starting from 0
     remaining_nodes = sorted(adjacency.keys())
@@ -110,6 +112,111 @@ def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=
     return adj_matrix, cliques#, node_mapping
 
 
+def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, seed=42):
+    """
+    Generates a random clustered network with cliques of size M.
+
+    Parameters:
+        N (int): Total number of nodes in the network.
+        M (int): Size of the cliques to be formed (M >= 3).
+        lambda_edges (float): Average number of single edges per node.
+        m_cliques (float): Number of cliques per node.
+        seed (int): Random seed for reproducibility.
+
+    Returns:
+        adj_matrix (numpy.ndarray): Adjacency matrix of the generated network.
+        cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
+    """
+    # Set random seed for reproducibility
+    np.random.seed(seed)
+    random.seed(seed)
+
+    # Generate degrees for edges and cliques
+    # For simplicity, we assume independence between edges and cliques
+    edge_degrees = np.random.poisson(lambda_edges, N)
+    clique_degrees = np.ones(N, dtype = int)*m_cliques
+
+    # Adjust degrees to ensure total stubs are compatible
+    # For edges
+    if sum(edge_degrees) % 2 != 0:
+        idx = np.random.randint(0, N)
+        edge_degrees[idx] += 1
+
+    # For cliques
+    remainder = sum(clique_degrees) % M
+    print(remainder)
+    if remainder != 0:
+        for _ in range(M - remainder):
+            idx = np.random.randint(0, N)
+            clique_degrees[idx] += 1
+
+    # Create edge stubs and clique stubs
+    edge_stubs = []
+    for node, degree in enumerate(edge_degrees):
+        edge_stubs.extend([node] * degree)
+
+    clique_stubs = []
+    for node, degree in enumerate(clique_degrees):
+        clique_stubs.extend([node] * degree)
+
+    # Shuffle stubs
+    np.random.shuffle(edge_stubs)
+    np.random.shuffle(clique_stubs)
+
+    # Construct edges by pairing edge stubs
+    edges = []
+    for i in range(0, len(edge_stubs), 2):
+        if i + 1 < len(edge_stubs):
+            n1 = edge_stubs[i]
+            n2 = edge_stubs[i + 1]
+            if n1 != n2:
+                edges.append((n1, n2))
+
+    # Construct cliques by grouping clique stubs into groups of size M
+    cliques = []
+    for i in range(0, len(clique_stubs), M):
+        if i + M - 1 < len(clique_stubs):
+            nodes = clique_stubs[i:i + M]
+            unique_nodes = set(nodes)
+            if len(unique_nodes) == M:
+                cliques.append(nodes)
+
+    # Combine edges and cliques into adjacency list
+    adjacency = {i: set() for i in range(N)}
+
+    # Add edges to adjacency list
+    for n1, n2 in edges:
+        adjacency[n1].add(n2)
+        adjacency[n2].add(n1)
+
+    # Add cliques to adjacency list
+    for clique_nodes in cliques:
+        for n1 in clique_nodes:
+            others = set(clique_nodes) - {n1}
+            adjacency[n1].update(others)
+
+    # Remove isolated nodes (nodes with no neighbors)
+    #isolated_nodes = [node for node, neighbors in adjacency.items() if not neighbors]
+    #for node in isolated_nodes:
+    #    del adjacency[node]
+
+    # Reindex nodes to have consecutive indices starting from 0
+    remaining_nodes = sorted(adjacency.keys())
+    node_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(remaining_nodes)}
+    num_nodes = len(remaining_nodes)
+
+    # Create adjacency matrix
+    adj_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
+    for old_node, neighbors in adjacency.items():
+        new_node = node_mapping[old_node]
+        for neighbor in neighbors:
+            if neighbor in node_mapping:
+                new_neighbor = node_mapping[neighbor]
+                adj_matrix[new_node, new_neighbor] = 1
+                # For undirected graph, ensure symmetry
+                adj_matrix[new_neighbor, new_node] = 1
+
+    return adj_matrix, cliques
 
 def remove_clusters(adj_matrix, cliques, s_f=0.0, seed=42):
     """
@@ -139,7 +246,7 @@ def remove_clusters(adj_matrix, cliques, s_f=0.0, seed=42):
     num_cliques = len(cliques)
     if num_cliques == 0:
         print("No cliques to remove.")
-        return adj_matrix.copy(), cliques.copy(), []
+        return adj_matrix.copy()#, cliques.copy(), []
 
     num_cliques_to_remove = int(s_f * num_cliques)
     num_cliques_to_remove = min(num_cliques_to_remove, num_cliques)  # Ensure we don't exceed available cliques
@@ -166,8 +273,67 @@ def remove_clusters(adj_matrix, cliques, s_f=0.0, seed=42):
 
     return new_adj_matrix#, remaining_cliques, cliques_to_remove
 
+def keep_clusters(adj_matrix, cliques, s_f=1.0, seed=42):
+    """
+    Keeps a fraction s_f of clusters (cliques) and removes all nodes not in the selected cliques.
 
+    Parameters:
+        adj_matrix (numpy.ndarray): Adjacency matrix of the network.
+        cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
+        s_f (float): Fraction of cliques to keep (0 <= s_f <= 1).
+        seed (int): Random seed for reproducibility.
 
+    Returns:
+        new_adj_matrix (numpy.ndarray): Adjacency matrix after keeping specified cliques and removing other nodes.
+        remaining_cliques (list of lists): List of cliques that were kept.
+        removed_cliques (list of lists): List of cliques that were removed.
+    """
+    if not (0.0 <= s_f <= 1.0):
+        raise ValueError("Fraction s_f must be between 0 and 1.")
+
+    if s_f == 0.0:
+        # Keep no cliques, hence remove all nodes
+        return np.array([[]], dtype=int)#, [], cliques.copy()
+
+    np.random.seed(seed)
+    random.seed(seed)
+
+    num_cliques = len(cliques)
+    if num_cliques == 0:
+        print("No cliques to keep.")
+        return adj_matrix.copy()#, [], []
+
+    num_cliques_to_keep = int(s_f * num_cliques)
+    num_cliques_to_keep = min(num_cliques_to_keep, num_cliques)  # Ensure we don't exceed available cliques
+
+    # Randomly select cliques to keep
+    cliques_to_keep = random.sample(cliques, num_cliques_to_keep)
+
+    # Collect all nodes to keep (unique set)
+    nodes_to_keep = set()
+    for clique in cliques_to_keep:
+        nodes_to_keep.update(clique)
+
+    if not nodes_to_keep:
+        # No nodes to keep
+        return np.array([[]], dtype=int)#, [], cliques.copy()
+
+    # Convert adjacency matrix to a NetworkX graph for easier manipulation
+    G = nx.from_numpy_array(adj_matrix)
+
+    # Remove nodes not in nodes_to_keep
+    all_nodes = set(G.nodes())
+    nodes_to_remove = all_nodes - nodes_to_keep
+    G.remove_nodes_from(nodes_to_remove)
+
+    # Generate new adjacency matrix
+    new_adj_matrix = nx.to_numpy_array(G)
+
+    # Update the cliques list by keeping only the selected cliques
+    #remaining_cliques = cliques_to_keep.copy()
+    #removed_cliques = [clique for clique in cliques if clique not in cliques_to_keep]
+
+    return new_adj_matrix#, remaining_cliques, removed_cliques
 
 def perform_bond_percolation(adj_matrix, N_p, p_values):
     """
