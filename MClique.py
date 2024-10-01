@@ -5,8 +5,7 @@ import networkx as nx
 from scipy.interpolate import interp1d
 from tqdm import tqdm
 
-
-def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=42):
+def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, nr_cliques=False):
     """
     Generates a random clustered network with cliques of size M.
 
@@ -16,14 +15,15 @@ def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=
         lambda_edges (float): Average number of single edges per node.
         lambda_cliques (float): Average number of cliques per node.
         seed (int): Random seed for reproducibility.
+        nr_cliques (bool): If True, returns the number of cliques in the network.
 
     Returns:
-        adj_matrix (numpy.ndarray): Adjacency matrix of the generated network.
-        cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
+        If nr_cliques is True:
+            int: Number of cliques in the network.
+        Else:
+            adj_matrix (numpy.ndarray): Adjacency matrix of the generated network.
+            cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
     """
-    # Set random seed for reproducibility
-    np.random.seed(seed)
-    random.seed(seed)
 
     # Generate degrees for edges and cliques
     # For simplicity, we assume independence between edges and cliques
@@ -88,11 +88,6 @@ def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=
             others = set(clique_nodes) - {n1}
             adjacency[n1].update(others)
 
-    # Remove isolated nodes (nodes with no neighbors)
-    #isolated_nodes = [node for node, neighbors in adjacency.items() if not neighbors]
-    #for node in isolated_nodes:
-    #    del adjacency[node]
-
     # Reindex nodes to have consecutive indices starting from 0
     remaining_nodes = sorted(adjacency.keys())
     node_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(remaining_nodes)}
@@ -109,10 +104,12 @@ def generate_clustered_network(N, M, lambda_edges=2.5, lambda_cliques=2.0, seed=
                 # For undirected graph, ensure symmetry
                 adj_matrix[new_neighbor, new_node] = 1
 
-    return adj_matrix, cliques#, node_mapping
+    if nr_cliques:
+        return adj_matrix, cliques, len(cliques)
+    else:
+        return adj_matrix, cliques
 
-
-def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, seed=42):
+def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, nr_cliques=False, no_clique = False):
     """
     Generates a random clustered network with cliques of size M.
 
@@ -127,14 +124,15 @@ def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, s
         adj_matrix (numpy.ndarray): Adjacency matrix of the generated network.
         cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
     """
-    # Set random seed for reproducibility
-    np.random.seed(seed)
-    random.seed(seed)
 
     # Generate degrees for edges and cliques
     # For simplicity, we assume independence between edges and cliques
-    edge_degrees = np.random.poisson(lambda_edges, N)
-    clique_degrees = np.ones(N, dtype = int)*m_cliques
+    if no_clique:
+        edge_degrees = np.random.poisson(lambda_edges, N) + (M-1)*nr_cliques
+        clique_degrees = np.zeros(N, dtype = int)
+    else:
+        edge_degrees = np.random.poisson(lambda_edges, N)
+        clique_degrees = np.ones(N, dtype = int)*m_cliques
 
     # Adjust degrees to ensure total stubs are compatible
     # For edges
@@ -144,7 +142,6 @@ def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, s
 
     # For cliques
     remainder = sum(clique_degrees) % M
-    print(remainder)
     if remainder != 0:
         for _ in range(M - remainder):
             idx = np.random.randint(0, N)
@@ -215,10 +212,12 @@ def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, s
                 adj_matrix[new_node, new_neighbor] = 1
                 # For undirected graph, ensure symmetry
                 adj_matrix[new_neighbor, new_node] = 1
+    if nr_cliques:
+        return adj_matrix, cliques, len(cliques)
+    else:
+        return adj_matrix, cliques
 
-    return adj_matrix, cliques
-
-def remove_clusters(adj_matrix, cliques, s_f=0.0, seed=42):
+def remove_clusters(adj_matrix, cliques, s_f=0.0):
     """
     Removes a fraction s_f of clusters (cliques) and their nodes from the network.
 
@@ -240,8 +239,6 @@ def remove_clusters(adj_matrix, cliques, s_f=0.0, seed=42):
         # No removal needed
         return adj_matrix.copy()#, cliques.copy(), []
 
-    np.random.seed(seed)
-    random.seed(seed)
 
     num_cliques = len(cliques)
     if num_cliques == 0:
@@ -273,40 +270,39 @@ def remove_clusters(adj_matrix, cliques, s_f=0.0, seed=42):
 
     return new_adj_matrix#, remaining_cliques, cliques_to_remove
 
-def keep_clusters(adj_matrix, cliques, s_f=1.0, seed=42):
+def keep_clusters_with_node_swap(adj_matrix, cliques, s_f=1.0, H=0.0):
     """
     Keeps a fraction s_f of clusters (cliques) and removes all nodes not in the selected cliques.
+    Then, after selecting nodes to keep, randomly discard a fraction H of these nodes,
+    and randomly choose the same number of nodes from the remaining nodes (which includes the ones just discarded) to keep instead.
 
     Parameters:
         adj_matrix (numpy.ndarray): Adjacency matrix of the network.
         cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
         s_f (float): Fraction of cliques to keep (0 <= s_f <= 1).
+        H (float): Fraction of nodes in the selected cliques to swap with nodes from the rest of the network (0 <= H <= 1).
         seed (int): Random seed for reproducibility.
 
     Returns:
-        new_adj_matrix (numpy.ndarray): Adjacency matrix after keeping specified cliques and removing other nodes.
-        remaining_cliques (list of lists): List of cliques that were kept.
-        removed_cliques (list of lists): List of cliques that were removed.
+        new_adj_matrix (numpy.ndarray): Adjacency matrix after the modifications.
     """
     if not (0.0 <= s_f <= 1.0):
         raise ValueError("Fraction s_f must be between 0 and 1.")
+    if not (0.0 <= H <= 1.0):
+        raise ValueError("Fraction H must be between 0 and 1.")
 
     if s_f == 0.0:
         # Keep no cliques, hence remove all nodes
-        return np.array([[]], dtype=int)#, [], cliques.copy()
-
-    np.random.seed(seed)
-    random.seed(seed)
+        return np.array([[]], dtype=int)
 
     num_cliques = len(cliques)
     if num_cliques == 0:
         print("No cliques to keep.")
-        return adj_matrix.copy()#, [], []
+        return np.array([[]], dtype=int)
 
+    # Step 1: Keep a fraction s_f of cliques
     num_cliques_to_keep = int(s_f * num_cliques)
-    num_cliques_to_keep = min(num_cliques_to_keep, num_cliques)  # Ensure we don't exceed available cliques
-
-    # Randomly select cliques to keep
+    num_cliques_to_keep = max(num_cliques_to_keep, 1)  # Ensure at least one clique is kept
     cliques_to_keep = random.sample(cliques, num_cliques_to_keep)
 
     # Collect all nodes to keep (unique set)
@@ -316,24 +312,47 @@ def keep_clusters(adj_matrix, cliques, s_f=1.0, seed=42):
 
     if not nodes_to_keep:
         # No nodes to keep
-        return np.array([[]], dtype=int)#, [], cliques.copy()
+        return np.array([[]], dtype=int)
 
-    # Convert adjacency matrix to a NetworkX graph for easier manipulation
-    G = nx.from_numpy_array(adj_matrix)
+    # Step 2: Randomly discard a fraction H of the nodes_to_keep
+    num_nodes_to_discard = int(H * len(nodes_to_keep))
+    num_nodes_to_discard = min(num_nodes_to_discard, len(nodes_to_keep))
+    nodes_to_keep_list = list(nodes_to_keep)  # Convert to list for sampling
+    nodes_to_discard = set(random.sample(nodes_to_keep_list, num_nodes_to_discard))
 
-    # Remove nodes not in nodes_to_keep
-    all_nodes = set(G.nodes())
-    nodes_to_remove = all_nodes - nodes_to_keep
-    G.remove_nodes_from(nodes_to_remove)
+    # Update nodes_to_keep by removing nodes_to_discard
+    nodes_to_keep -= nodes_to_discard
 
-    # Generate new adjacency matrix
-    new_adj_matrix = nx.to_numpy_array(G)
+    # Step 3: Randomly select the same number of nodes from the rest of the network to add to nodes_to_keep
+    all_nodes = set(range(adj_matrix.shape[0]))
+    nodes_not_kept = all_nodes - nodes_to_keep
+    nodes_to_add = set(random.sample(sorted(nodes_not_kept), num_nodes_to_discard))
 
-    # Update the cliques list by keeping only the selected cliques
-    #remaining_cliques = cliques_to_keep.copy()
-    #removed_cliques = [clique for clique in cliques if clique not in cliques_to_keep]
+    # Update nodes_to_keep by adding nodes_to_add
+    nodes_to_keep.update(nodes_to_add)
 
-    return new_adj_matrix#, remaining_cliques, removed_cliques
+    # Now nodes_to_keep contains the nodes after swapping
+    if not nodes_to_keep:
+        # No nodes to keep after swapping
+        return np.array([[]], dtype=int)
+
+    # Build the new adjacency matrix
+    # Map node indices to consecutive indices starting from 0
+    nodes_to_keep_sorted = sorted(nodes_to_keep)
+    node_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(nodes_to_keep_sorted)}
+    num_nodes_new = len(nodes_to_keep_sorted)
+
+    # Create new adjacency matrix
+    new_adj_matrix = np.zeros((num_nodes_new, num_nodes_new), dtype=adj_matrix.dtype)
+    for old_i in nodes_to_keep_sorted:
+        new_i = node_mapping[old_i]
+        neighbors = np.nonzero(adj_matrix[old_i])[0]
+        for old_j in neighbors:
+            if old_j in nodes_to_keep:
+                new_j = node_mapping[old_j]
+                new_adj_matrix[new_i, new_j] = adj_matrix[old_i, old_j]
+
+    return new_adj_matrix
 
 def perform_bond_percolation(adj_matrix, N_p, p_values):
     """
@@ -432,4 +451,65 @@ def estimate_percolation_threshold(p_values, giant_component_sizes):
     
     return p_c
 
+def perform_percolation(adj_matrix, p, N_p, epi = False):
+    """
+    Performs percolation starting from randomly selected node(s).
 
+    Parameters:
+        adj_matrix (numpy.ndarray): Adjacency matrix of the network.
+        p_i (float): Percolation probability (beta / (beta + gamma)).
+        N_p (int): Number of percolation trials per edge retention probability.
+
+    Returns:
+        fraction_infected (float): Fraction of nodes reached by percolation.
+    """
+    num_nodes = adj_matrix.shape[0]
+    if num_nodes == 0:
+        return 0.0  # Empty network
+
+    largest_components = []
+    cluster_sizes = []
+    
+    for _ in range(N_p):
+        # Perform bond percolation by retaining edges with probability p
+        percolated_adj = adj_matrix.copy()
+        # Get indices of the upper triangle (since adj_matrix is symmetric)
+        upper_tri_indices = np.triu_indices(num_nodes, k=1)
+        edges = np.vstack(upper_tri_indices).T
+        existing_edges = edges[percolated_adj[upper_tri_indices] > 0]
+        
+        # Randomly remove edges
+        retain_mask = np.random.rand(len(existing_edges)) <= p
+        retained_edges = existing_edges[retain_mask]
+        
+        # Create a new adjacency matrix for the percolated graph
+        percolated_adj = np.zeros_like(adj_matrix)
+        percolated_adj[retained_edges[:, 0], retained_edges[:, 1]] = 1
+        percolated_adj[retained_edges[:, 1], retained_edges[:, 0]] = 1  # Symmetric
+
+
+        num_nodes = percolated_adj.shape[0]
+        if np.shape(percolated_adj) == (1,0):
+            largest_components.append(0)
+            cluster_sizes.append(0)
+        else:
+            # Create a NetworkX graph from the percolated adjacency matrix
+            G_perc = nx.from_numpy_array(percolated_adj)
+            
+            # Get connected components
+            connected_components = [len(cc)/num_nodes for cc in nx.connected_components(G_perc)]
+            
+            if connected_components:
+                # Largest connected component size
+                largest_components.append(max(connected_components))
+                # Record all cluster sizes
+                cluster_sizes.extend(connected_components)
+            else:
+                largest_components.append(0)
+                cluster_sizes.extend(0)
+    
+    # Average size of the largest connected component for this p
+    avg_largest_component = np.mean(largest_components)
+    mean_cluster_size = np.mean(cluster_sizes)#/num_nodes
+    prob_outbreak = np.average(cluster_sizes, weights = cluster_sizes)
+    return mean_cluster_size, avg_largest_component, prob_outbreak
