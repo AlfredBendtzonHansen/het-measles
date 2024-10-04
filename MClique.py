@@ -217,58 +217,6 @@ def generate_clustered_network_discrete_M(N, M, lambda_edges=2.5, m_cliques=2, n
     else:
         return adj_matrix, cliques
 
-def remove_clusters(adj_matrix, cliques, s_f=0.0):
-    """
-    Removes a fraction s_f of clusters (cliques) and their nodes from the network.
-
-    Parameters:
-        adj_matrix (numpy.ndarray): Adjacency matrix of the network.
-        cliques (list of lists): List containing all the cliques (each clique is a list of node indices).
-        s_f (float): Fraction of cliques to remove (0 <= s_f <= 1).
-        seed (int): Random seed for reproducibility.
-
-    Returns:
-        new_adj_matrix (numpy.ndarray): Adjacency matrix after removing specified cliques and their nodes.
-        remaining_cliques (list of lists): List of cliques remaining after removal.
-        removed_cliques (list of lists): List of cliques that were removed.
-    """
-    if not (0.0 <= s_f <= 1.0):
-        raise ValueError("Fraction s_f must be between 0 and 1.")
-
-    if s_f == 0.0:
-        # No removal needed
-        return adj_matrix.copy()#, cliques.copy(), []
-
-
-    num_cliques = len(cliques)
-    if num_cliques == 0:
-        print("No cliques to remove.")
-        return adj_matrix.copy()#, cliques.copy(), []
-
-    num_cliques_to_remove = int(s_f * num_cliques)
-    num_cliques_to_remove = min(num_cliques_to_remove, num_cliques)  # Ensure we don't exceed available cliques
-
-    # Randomly select cliques to remove
-    cliques_to_remove = random.sample(cliques, num_cliques_to_remove)
-
-    # Collect all nodes to remove (unique set)
-    nodes_to_remove = set()
-    for clique in cliques_to_remove:
-        nodes_to_remove.update(clique)
-
-    # Convert adjacency matrix to a NetworkX graph for easier manipulation
-    G = nx.from_numpy_array(adj_matrix)
-
-    # Remove the nodes
-    G.remove_nodes_from(nodes_to_remove)
-
-    # Generate new adjacency matrix
-    new_adj_matrix = nx.to_numpy_array(G, dtype=int)
-
-    # Update the cliques list by removing the cliques that were removed
-    remaining_cliques = [clique for clique in cliques if clique not in cliques_to_remove]
-
-    return new_adj_matrix#, remaining_cliques, cliques_to_remove
 
 def keep_clusters_with_node_swap(adj_matrix, cliques, s_f=1.0, H=0.0):
     """
@@ -297,7 +245,7 @@ def keep_clusters_with_node_swap(adj_matrix, cliques, s_f=1.0, H=0.0):
 
     num_cliques = len(cliques)
     if num_cliques == 0:
-        print("No cliques to keep.")
+        #print("No cliques to keep.")
         return np.array([[]], dtype=int)
 
     # Step 1: Keep a fraction s_f of cliques
@@ -511,5 +459,8 @@ def perform_percolation(adj_matrix, p, N_p, epi = False):
     # Average size of the largest connected component for this p
     avg_largest_component = np.mean(largest_components)
     mean_cluster_size = np.mean(cluster_sizes)#/num_nodes
-    prob_outbreak = np.average(cluster_sizes, weights = cluster_sizes)
-    return mean_cluster_size, avg_largest_component, prob_outbreak
+    if np.sum(cluster_sizes) == 0:
+        return 0
+    else: 
+        prob_outbreak = np.average(cluster_sizes, weights = cluster_sizes)
+        return prob_outbreak

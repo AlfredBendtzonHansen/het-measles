@@ -79,7 +79,7 @@ I0_vec[3:end] .= 2*0.001/(Nc-1)
 final_sizes =zeros(H_res,Nc)
 
 
-β = 1.6
+β = 15*0.8
 ν = 0.8
 @showprogress for i in 1:H_res
     for j in Ncs_range
@@ -125,7 +125,7 @@ annotate!(0.1, 0.9, text(L"R_0(s,H) = 1", :red, 8))
 
 vline!([ν/β], color=:blue, linewidth=2,label=L"ν/β",legend = :bottomright)
 
-savefig("Outbreaksizes_R0_2.pdf")
+savefig("Outbreaksizes_R0_15.pdf")
 
 
 
