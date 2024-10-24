@@ -464,3 +464,85 @@ def perform_percolation(adj_matrix, p, N_p, epi = False):
     else: 
         prob_outbreak = np.average(cluster_sizes, weights = cluster_sizes)
         return prob_outbreak
+
+def gillespie_SIR(adj_matrix, beta, gamma, initial_infected, max_time):
+    """
+    Simulates the SIR epidemic using the Gillespie algorithm on a given network.
+
+    Parameters:
+        adj_matrix (numpy.ndarray): Adjacency matrix of the network.
+        beta (float): Infection rate per contact.
+        gamma (float): Recovery rate.
+        initial_infected (list or set): Indices of initially infected nodes.
+        max_time (float): Maximum simulation time.
+
+    Returns:
+        times (list): Times at which events occur.
+        num_infected (list): Number of infected individuals over time.
+        final_size (int): Total number of recovered individuals at the end.
+        events (list): List of events that occurred (infection or recovery).
+    """
+    N = adj_matrix.shape[0]
+    S = set(range(N)) - set(initial_infected)
+    I = set(initial_infected)
+    R = set()
+
+    t = 0.0
+    times = [t]
+    num_infected = [len(I)]
+    events = []
+
+    while t < max_time and len(I) > 0:
+        rates = []
+        events_list = []
+
+        for node in I:
+            # Recovery event for this node
+            recovery_rate = gamma
+            rates.append(recovery_rate)
+            events_list.append(('recovery', node))
+
+            # Infection events to susceptible neighbors
+            neighbors = np.where(adj_matrix[node, :] > 0)[0]
+            susceptible_neighbors = S.intersection(neighbors)
+            infection_rate = beta * len(susceptible_neighbors)
+            if infection_rate > 0:
+                rates.append(infection_rate)
+                events_list.append(('infection', node, susceptible_neighbors))
+
+        total_rate = sum(rates)
+
+        if total_rate == 0:
+            break  # No more possible events
+
+        dt = -np.log(np.random.rand()) / total_rate
+        t += dt
+
+        # Choose event
+        cumulative_rates = np.cumsum(rates)
+        r = np.random.rand() * total_rate
+        event_index = np.searchsorted(cumulative_rates, r)
+        event = events_list[event_index]
+
+        if event[0] == 'recovery':
+            node = event[1]
+            I.remove(node)
+            R.add(node)
+        elif event[0] == 'infection':
+            infector = event[1]
+            susceptible_neighbors = event[2]
+            if susceptible_neighbors:
+                infectee = random.choice(list(susceptible_neighbors))
+                S.remove(infectee)
+                I.add(infectee)
+            else:
+                continue  # No susceptible neighbors to infect
+
+        times.append(t)
+        num_infected.append(len(I))
+        events.append(event)
+
+    final_size = len(R)
+
+    return times, num_infected, final_size, events
+
